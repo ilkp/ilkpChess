@@ -38,11 +38,18 @@ void Logger::writeLog(const std::string& msg) const
 		return;
 
 	std::unique_lock logLock(logMutex());
-	std::cout
-		<< formatLogTime(std::chrono::system_clock::now()) << " "
-		<< _name << ": "
-		<< msg
-		<< (msg.back() == '\n' ? "" : "\n");
+	try
+	{
+		std::cout
+			<< formatLogTime(std::chrono::system_clock::now()) << " "
+			<< _name << ": "
+			<< msg
+			<< (msg.back() == '\n' ? "" : "\n");
+	}
+	catch (std::exception e)
+	{
+		std::cout << e.what();
+	}
 }
 
 inline void writeLogStandalone(const std::string& msg)

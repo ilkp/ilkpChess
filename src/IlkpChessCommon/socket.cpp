@@ -85,25 +85,24 @@ void Socket::stopReading()
         _readThread.join();
 }
 
-void Socket::write(const std::string& msg)
+void Socket::write(char id, const std::string& msg)
 {
     std::unique_lock lock(_writeMutex);
     std::string sizeMsg = std::to_string(msg.size());
     sizeMsg.insert(0, msgSizeBytes - sizeMsg.size(), '0');
+    writeBytes(sizeMsg.data(), sizeMsg.size());
+    writeBytes(&id, sizeof(char));
+    writeBytes(msg.data(), msg.size());
+}
 
-    size_t sizeBytesSent = 0;
-    while (sizeBytesSent < msgSizeBytes)
-    {
-        const size_t sent = send(_socket, sizeMsg.data() + sizeBytesSent, sizeMsg.size() - sizeBytesSent, 0);
-        sizeBytesSent += sent;
-    }
-
-    size_t msgBytesSent = 0;
-    while (msgBytesSent < msg.size())
-    {
-        const size_t sent = send(_socket, msg.data() + msgBytesSent, msg.size() - msgBytesSent, 0);
-        msgBytesSent += sent;
-    }
+void Socket::write(char id, const char* msg, size_t bytes)
+{
+    std::unique_lock lock(_writeMutex);
+    std::string sizeMsg = std::to_string(bytes);
+    sizeMsg.insert(0, msgSizeBytes - sizeMsg.size(), '0');
+    writeBytes(sizeMsg.data(), sizeMsg.size());
+    writeBytes(&id, sizeof(char));
+    writeBytes(msg, bytes);
 }
 
 uint64_t Socket::subStatusChangedCallback(StatusChangedCallback callback)
@@ -126,9 +125,9 @@ void Socket::notify(Status status)
         callback(status);
 }
 
-void Socket::notify(const std::string& msg)
+void Socket::notify(char id, const std::string& msg) const
 {
-    for (auto& [id, callback] : _msgReceivedCallbacks)
+    for (auto& [callbackId, callback] : _msgReceivedCallbacks)
         callback(msg);
 }
 
@@ -160,7 +159,15 @@ void Socket::readLoop()
             const ReadResult msgSizeRead = readBytes(_socket, msgSizeBytes);
             if (msgSizeRead.resultCode != ResultCode::success)
             {
-                writeLog("Reading msg size returned error: " + std::to_string(GETSOCKETERRNO()));
+                writeLog("reading msg size returned error: " + std::to_string(GETSOCKETERRNO()));
+                _isReading = false;
+                break;
+            }
+
+            const ReadResult idRead = readBytes(_socket, sizeof(char));
+            if (idRead.resultCode != ResultCode::success)
+            {
+                writeLog("reading msg id returned error: " + std::to_string(GETSOCKETERRNO()));
                 _isReading = false;
                 break;
             }
@@ -168,14 +175,28 @@ void Socket::readLoop()
             const ReadResult msgRead = readBytes(_socket, std::stoll(msgSizeRead.msg));
             if (msgRead.resultCode != ResultCode::success)
             {
-                writeLog("Reading msg returned error: " + std::to_string(GETSOCKETERRNO()));
+                writeLog("reading msg returned error: " + std::to_string(GETSOCKETERRNO()));
                 _isReading = false;
                 break;
             }
 
-            notify(msgRead.msg);
+            writeLog("received id " + std::to_string(idRead.msg.at(0)));
+            notify(idRead.msg.at(0), msgRead.msg);
         }
     }
+}
+
+int Socket::writeBytes(const char* data, size_t bytes) const
+{
+    size_t msgBytesSent = 0;
+    while (msgBytesSent < bytes)
+    {
+        const int sent = send(_socket, data + msgBytesSent, bytes - msgBytesSent, 0);
+        if (sent == SOCKETERROR)
+            return sent;
+        msgBytesSent += sent;
+    }
+    return msgBytesSent;
 }
 
 Socket::ReadResult Socket::readBytes(SOCKET socket, size_t bytes) const
@@ -191,6 +212,5 @@ Socket::ReadResult Socket::readBytes(SOCKET socket, size_t bytes) const
             return ReadResult{ ResultCode::closed, std::move(receiveBuffer) };
         totalBytesRead += bytesRead;
     }
-    writeLog("Received: " + receiveBuffer);
     return ReadResult{ ResultCode::success, std::move(receiveBuffer) };
 }

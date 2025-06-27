@@ -4,7 +4,6 @@
 
 Client::Client(const std::string& name, const std::string& ip, const std::string& port) :
 	Logger(name),
-	_isClosed(false),
 	_closeRequested(false),
 	_mainThread(std::thread(&Client::mainLoop, this, ip, port))
 {
@@ -12,19 +11,20 @@ Client::Client(const std::string& name, const std::string& ip, const std::string
 
 Client::~Client()
 {
-	_mainThread.join();
-}
-
-void Client::waitForClose() const
-{
-	while (!_isClosed)
-		std::this_thread::sleep_for(std::chrono::milliseconds(100));
+	_closeRequested = true;
+	waitForClose();
 }
 
 void Client::requestClose()
 {
 	writeLog("close requested");
 	_closeRequested = true;
+}
+
+void Client::waitForClose()
+{
+	if (_mainThread.joinable())
+		_mainThread.join();
 }
 
 void Client::mainLoop(const std::string& ip, const std::string& port)
@@ -50,7 +50,6 @@ void Client::mainLoop(const std::string& ip, const std::string& port)
 	if (!ISVALIDSOCKET(serverSocket))
 	{
 		writeLog("creating socket failed");
-		_isClosed = true;
 		return;
 	}
 
@@ -85,5 +84,4 @@ void Client::mainLoop(const std::string& ip, const std::string& port)
 		std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
 	writeLog("closing");
-	_isClosed = true;
 }

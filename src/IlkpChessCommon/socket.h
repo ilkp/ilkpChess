@@ -9,6 +9,12 @@
 #include <mutex>
 #include <atomic>
 
+enum SocketMsgId : char
+{
+	ping,
+	gameState
+};
+
 class Socket : Logger
 {
 public:
@@ -30,7 +36,8 @@ public:
 
 	void startReading();
 	void stopReading();
-	void write(const std::string& msg);
+	void write(char id, const std::string& msg);
+	void write(char id, const char* msg, size_t bytes);
 	uint64_t subStatusChangedCallback(StatusChangedCallback callback);
 	void unsubStatusChangedCallback(uint64_t callbackId);
 
@@ -49,8 +56,9 @@ private:
 	};
 
 	void notify(Status status);
-	void notify(const std::string& msg);
+	void notify(char id, const std::string& msg) const;
 	void readLoop();
+	int writeBytes(const char* data, size_t bytes) const;
 	ReadResult readBytes(SOCKET socket, size_t bytes) const;
 
 	Status _status;
