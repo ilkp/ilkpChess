@@ -1,13 +1,13 @@
 #include "socket.h"
-#include <cassert>
+#include <algorithm>
 
 Socket::Socket(const std::string& name, SOCKET socket) noexcept :
     Logger(name),
     _socket(socket),
     _status(Status::disconnected),
-    _nextMsgReceivedCbId(0),
-    _nextStatusChangedCbId(0),
-    _isReading(false)
+    _isReading(false),
+    _nextMsgReceivedCbToken(0),
+    _nextStatusChangedCbToken(0)
 {
 }
 
@@ -16,21 +16,19 @@ Socket::Socket(Socket&& other) noexcept :
     _status(other._status),
     _socket(other._socket),
     _msgReceivedCallbacks(std::move(other._msgReceivedCallbacks)),
-    _statusChangedCallbacks(std::move(other._statusChangedCallbacks))
+    _statusChangedCallbacks(std::move(other._statusChangedCallbacks)),
+    _nextMsgReceivedCbToken(other._nextMsgReceivedCbToken.load()),
+    _nextStatusChangedCbToken(other._nextStatusChangedCbToken.load())
 {
+    const bool otherWasReading = other._isReading.load();
     stopReading();
     other.stopReading();
-    _nextMsgReceivedCbId.store(other._nextMsgReceivedCbId.load());
-    _nextStatusChangedCbId.store(other._nextStatusChangedCbId.load());
-    _isReading.store(other._isReading.load());
-
     other._socket = invalidSocket();
     other._status = Status::disconnected;
-    other._nextMsgReceivedCbId = 0;
-    other._nextStatusChangedCbId = 0;
-    other._isReading = false;
+    other._nextMsgReceivedCbToken = 0;
+    other._nextStatusChangedCbToken = 0;
 
-    if (_isReading)
+    if (otherWasReading)
         startReading();
 }
 
@@ -48,13 +46,13 @@ Socket& Socket::operator=(Socket&& other) noexcept
         _status = other._status;
         _msgReceivedCallbacks = std::move(other._msgReceivedCallbacks);
         _statusChangedCallbacks = std::move(other._statusChangedCallbacks);
-        _nextMsgReceivedCbId = other._nextMsgReceivedCbId.load();
-        _nextStatusChangedCbId = other._nextStatusChangedCbId.load();
+        _nextMsgReceivedCbToken = other._nextMsgReceivedCbToken.load();
+        _nextStatusChangedCbToken = other._nextStatusChangedCbToken.load();
 
         other._socket = invalidSocket();
         other._status = Status::disconnected;
-        other._nextMsgReceivedCbId = 0;
-        other._nextStatusChangedCbId = 0;
+        other._nextMsgReceivedCbToken = 0;
+        other._nextStatusChangedCbToken = 0;
         other._isReading = false;
 
         if (_isReading)
@@ -72,10 +70,32 @@ Socket::~Socket()
     }
 }
 
+bool Socket::isValid() const
+{
+    return ISVALIDSOCKET(_socket);
+}
+
+std::string Socket::getIp() const
+{
+    std::string ip = "";
+    if (isValid())
+    {
+        sockaddr_in address{};
+        socklen_t addressLen = sizeof(sockaddr);
+        if (getpeername(_socket, (sockaddr*)(&address), &addressLen) == 0)
+        {
+            ip.resize(INET_ADDRSTRLEN, '0');
+            inet_ntop(AF_INET, &address.sin_addr, ip.data(), ip.size());
+        }
+    }
+    return ip;
+}
+
 void Socket::startReading()
 {
     _isReading = true;
-    _readThread = std::thread(&Socket::readLoop, this);
+    if (!_readThread.joinable())
+        _readThread = std::thread(&Socket::readLoop, this);
 }
 
 void Socket::stopReading()
@@ -85,50 +105,73 @@ void Socket::stopReading()
         _readThread.join();
 }
 
-void Socket::write(char id, const std::string& msg)
+void Socket::write(SocketMsgId id, const std::string& msg)
 {
     std::unique_lock lock(_writeMutex);
     std::string sizeMsg = std::to_string(msg.size());
-    sizeMsg.insert(0, msgSizeBytes - sizeMsg.size(), '0');
+    sizeMsg.insert(0, sizeMsgBytes - sizeMsg.size(), '0');
     writeBytes(sizeMsg.data(), sizeMsg.size());
-    writeBytes(&id, sizeof(char));
+    writeBytes(reinterpret_cast<const char*>(&id), sizeof(SocketMsgIdType));
     writeBytes(msg.data(), msg.size());
 }
 
-void Socket::write(char id, const char* msg, size_t bytes)
+void Socket::write(SocketMsgId id, const char* msg, size_t bytes)
 {
     std::unique_lock lock(_writeMutex);
     std::string sizeMsg = std::to_string(bytes);
-    sizeMsg.insert(0, msgSizeBytes - sizeMsg.size(), '0');
+    sizeMsg.insert(0, sizeMsgBytes - sizeMsg.size(), '0');
     writeBytes(sizeMsg.data(), sizeMsg.size());
-    writeBytes(&id, sizeof(char));
+    writeBytes(reinterpret_cast<const char*>(&id), sizeof(SocketMsgIdType));
     writeBytes(msg, bytes);
 }
 
-uint64_t Socket::subStatusChangedCallback(StatusChangedCallback callback)
+CallbackToken Socket::subStatusChangedCallback(StatusChangedCallback callback)
 {
     callback(_status);
-    _statusChangedCallbacks.insert({ _nextStatusChangedCbId++, std::move(callback) });
-    return _nextStatusChangedCbId;
+    _statusChangedCallbacks.insert({ _nextStatusChangedCbToken, std::move(callback) });
+    return _nextStatusChangedCbToken++;
 }
 
-void Socket::unsubStatusChangedCallback(uint64_t callbackId)
+void Socket::unsubStatusChangedCallback(CallbackToken token)
 {
-    _statusChangedCallbacks.erase(callbackId);
+    _statusChangedCallbacks.erase(token);
+}
+
+CallbackToken Socket::subMsgReceivedCallback(SocketMsgId id, MsgReceivedCallback callback)
+{
+    if (_msgReceivedCbTokens.count(id) == 0)
+        _msgReceivedCbTokens.insert({ id, std::vector<CallbackToken>{ _nextMsgReceivedCbToken } });
+
+    _msgReceivedCallbacks.insert({ _nextMsgReceivedCbToken, std::move(callback) });
+    return _nextMsgReceivedCbToken++;
+}
+
+void Socket::unsubMsgReceivedCallback(SocketMsgId id, CallbackToken token)
+{
+    if (auto msgIt = _msgReceivedCbTokens.find(id); msgIt != _msgReceivedCbTokens.end())
+    {
+        if (auto tokenIt = std::find(msgIt->second.begin(), msgIt->second.end(), token); tokenIt != msgIt->second.end())
+        {
+            _msgReceivedCallbacks.erase(*tokenIt);
+            msgIt->second.erase(tokenIt);
+        }
+    }
 }
 
 void Socket::notify(Status status)
 {
     std::unique_lock lock(_statusMutex);
     _status = status;
-    for (auto& [id, callback] : _statusChangedCallbacks)
+    for (auto& [callbackToken, callback] : _statusChangedCallbacks)
         callback(status);
 }
 
-void Socket::notify(char id, const std::string& msg) const
+void Socket::notify(SocketMsgId id, const std::string& msg) const
 {
-    for (auto& [callbackId, callback] : _msgReceivedCallbacks)
-        callback(msg);
+    if (auto it = _msgReceivedCbTokens.find(id); it != _msgReceivedCbTokens.end())
+        for (const CallbackToken& token : it->second)
+            if (auto cbIt = _msgReceivedCallbacks.find(token); cbIt != _msgReceivedCallbacks.end())
+                cbIt->second(msg);
 }
 
 void Socket::readLoop()
@@ -136,7 +179,7 @@ void Socket::readLoop()
     const struct timeval timeout { .tv_sec = 0, .tv_usec = 100000 };
     while (_isReading)
     {
-        fd_set readSet;
+        fd_set readSet{};
         FD_ZERO(&readSet);
         FD_SET(_socket, &readSet);
         
@@ -156,7 +199,7 @@ void Socket::readLoop()
 
         if (FD_ISSET(_socket, &readSet))
         {
-            const ReadResult msgSizeRead = readBytes(_socket, msgSizeBytes);
+            const ReadResult msgSizeRead = readBytes(_socket, sizeMsgBytes);
             if (msgSizeRead.resultCode != ResultCode::success)
             {
                 writeLog("reading msg size returned error: " + std::to_string(GETSOCKETERRNO()));
@@ -164,7 +207,7 @@ void Socket::readLoop()
                 break;
             }
 
-            const ReadResult idRead = readBytes(_socket, sizeof(char));
+            const ReadResult idRead = readBytes(_socket, sizeof(SocketMsgIdType));
             if (idRead.resultCode != ResultCode::success)
             {
                 writeLog("reading msg id returned error: " + std::to_string(GETSOCKETERRNO()));
@@ -181,7 +224,8 @@ void Socket::readLoop()
             }
 
             writeLog("received id " + std::to_string(idRead.msg.at(0)));
-            notify(idRead.msg.at(0), msgRead.msg);
+            const SocketMsgId msgId = static_cast<SocketMsgId>(idRead.msg[0]);
+            notify(msgId, msgRead.msg);
         }
     }
 }

@@ -6,14 +6,14 @@
 constexpr int boardWidth = 8;
 constexpr int boardSize = boardWidth * boardWidth;
 
-enum class Player
+enum class Side
 {
 	white,
 	black,
 	max,
 	none
 };
-typedef std::underlying_type<Player>::type PlayerUt;
+typedef std::underlying_type<Side>::type PlayerUt;
 
 enum class Piece
 {
@@ -36,11 +36,11 @@ typedef std::underlying_type<Piece>::type PieceUt;
 
 struct GameState
 {
-	Player turn;
-	std::array<bool, static_cast<PlayerUt>(Player::max)> longCastlesAvailable;
-	std::array<bool, static_cast<PlayerUt>(Player::max)> shortCastlesAvailable;
-	std::array<bool, static_cast<PlayerUt>(Player::max)> enPassants;
-	std::array<std::array<bool, boardWidth>, static_cast<PlayerUt>(Player::max)> enPassantsAvailable;
+	Side turn;
+	std::array<bool, static_cast<PlayerUt>(Side::max)> longCastlesAvailable;
+	std::array<bool, static_cast<PlayerUt>(Side::max)> shortCastlesAvailable;
+	std::array<bool, static_cast<PlayerUt>(Side::max)> enPassants;
+	std::array<std::array<bool, boardWidth>, static_cast<PlayerUt>(Side::max)> enPassantsAvailable;
 	std::array<Piece, boardSize> pieces;
 
 	static GameState defaultStartingState();

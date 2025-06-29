@@ -5,22 +5,18 @@
 #include <format>
 #include <chrono>
 
-inline std::mutex& logMutex()
-{
-	static std::mutex logMutex;
-	return logMutex;
-}
-
+std::mutex& logMutex();
 void writeLogStandalone(const std::string& msg);
-
 std::string formatLogTime(const std::chrono::system_clock::time_point& timePoint);
 
 class Logger
 {
 public:
-	Logger(const std::string& name, bool enabled = true);
+	Logger(const std::string& name, bool enabled = true) noexcept;
+	Logger(const Logger& other) noexcept;
 	Logger(Logger&& other) noexcept;
 	Logger& operator=(Logger&& other) noexcept;
+	Logger& operator=(const Logger& other) noexcept;
 
 	void setName(const std::string& name);
 	void setEnabled(bool enabled);

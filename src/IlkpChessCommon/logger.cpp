@@ -1,8 +1,36 @@
 #include "logger.h"
 
-Logger::Logger(const std::string& name, bool enabled) :
+std::mutex& logMutex()
+{
+	static std::mutex logMutex;
+	return logMutex;
+}
+
+inline void writeLogStandalone(const std::string& msg)
+{
+	std::unique_lock logLock(logMutex());
+	std::cout
+		<< formatLogTime(std::chrono::system_clock::now()) << " "
+		<< msg
+		<< (msg.back() == '\n' ? "" : "\n");
+}
+
+std::string formatLogTime(const std::chrono::system_clock::time_point& timePoint)
+{
+	const std::chrono::zoned_time localTimePoint{ std::chrono::current_zone(), timePoint };
+	const std::string time = std::format("{:%F %T} ", localTimePoint);
+	return time.substr(0, 23);
+}
+
+Logger::Logger(const std::string& name, bool enabled) noexcept :
 	_name(name),
 	_enabled(enabled)
+{
+}
+
+Logger::Logger(const Logger& other) noexcept :
+	_name(other._name),
+	_enabled(other._enabled)
 {
 }
 
@@ -19,6 +47,13 @@ Logger& Logger::operator=(Logger&& other) noexcept
 		_name = std::move(other._name);
 		_enabled = std::move(other._enabled);
 	}
+	return *this;
+}
+
+Logger& Logger::operator=(const Logger& other) noexcept
+{
+	_name = other._name;
+	_enabled = other._enabled;
 	return *this;
 }
 
@@ -50,20 +85,4 @@ void Logger::writeLog(const std::string& msg) const
 	{
 		std::cout << e.what();
 	}
-}
-
-inline void writeLogStandalone(const std::string& msg)
-{
-	std::unique_lock logLock(logMutex());
-	std::cout
-		<< formatLogTime(std::chrono::system_clock::now()) << " "
-		<< msg
-		<< (msg.back() == '\n' ? "" : "\n");
-}
-
-std::string formatLogTime(const std::chrono::system_clock::time_point& timePoint)
-{
-	const std::chrono::zoned_time localTimePoint{ std::chrono::current_zone(), timePoint };
-	const std::string time = std::format("{:%F %T} ", localTimePoint);
-	return time.substr(0, 23);
 }

@@ -83,6 +83,7 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClInclude Include="callback_token.h" />
     <ClInclude Include="chess.h" />
     <ClInclude Include="listen_socket.h" />
     <ClInclude Include="logger.h" />

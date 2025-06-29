@@ -16,5 +16,6 @@ public:
 
 private:
 	std::thread _mainThread;
+	std::chrono::milliseconds _tickRate;
 	std::atomic_bool _closeRequested;
 };

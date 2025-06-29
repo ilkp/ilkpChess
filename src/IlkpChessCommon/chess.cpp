@@ -2,11 +2,11 @@
 
 GameState GameState::defaultStartingState()
 {
-	constexpr PlayerUt whiteIndex = static_cast<PlayerUt>(Player::white);
-	constexpr PlayerUt blackIndex = static_cast<PlayerUt>(Player::black);
+	constexpr PlayerUt whiteIndex = static_cast<PlayerUt>(Side::white);
+	constexpr PlayerUt blackIndex = static_cast<PlayerUt>(Side::black);
 
 	GameState gameState{};
-	gameState.turn = Player::white;
+	gameState.turn = Side::white;
 
 	gameState.enPassants.at(whiteIndex) = -1;
 	gameState.enPassants.at(blackIndex) = -1;

@@ -42,4 +42,4 @@ inline SOCKET invalidSocket()
 #endif
 }
 
-const size_t msgSizeBytes = 8;
+const size_t sizeMsgBytes = 8;

@@ -17,14 +17,14 @@ public:
 	~ListenSocket();
 
 	void requestClose();
-	std::optional<Socket> nextSocket();
+	Socket nextSocket();
 
 private:
 	void listenConnections(const std::string& port);
 	void waitForClose();
 
 	std::thread _myThread;
-	std::deque<SOCKET> _acceptedSockets;
+	std::deque<Socket> _acceptedSockets;
 	std::mutex _acceptedSocketsMutex;
 	bool _closeRequested;
 };

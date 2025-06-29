@@ -2,6 +2,7 @@
 
 #include "sock_defs.h"
 #include "logger.h"
+#include "callback_token.h"
 
 #include <cstdint>
 #include <functional>
@@ -9,13 +10,17 @@
 #include <mutex>
 #include <atomic>
 
-enum SocketMsgId : char
+using SocketMsgIdType = char;
+
+enum SocketMsgId : SocketMsgIdType
 {
 	ping,
-	gameState
+	gameState,
+	youPlayAs,
+	startGame
 };
 
-class Socket : Logger
+class Socket : public Logger
 {
 public:
 	enum Status
@@ -28,18 +33,22 @@ public:
 	using StatusChangedCallback = std::function<void(Status status)>;
 
 	Socket(const std::string& name, SOCKET socket) noexcept;
-	Socket(Socket&& other) noexcept;
-	Socket& operator=(Socket&& other) noexcept;
 	Socket(const Socket&) = delete;
+	Socket(Socket&& other) noexcept;
 	Socket& operator=(const Socket&) = delete;
+	Socket& operator=(Socket&& other) noexcept;
 	~Socket();
 
+	bool isValid() const;
+	std::string getIp() const;
 	void startReading();
 	void stopReading();
-	void write(char id, const std::string& msg);
-	void write(char id, const char* msg, size_t bytes);
-	uint64_t subStatusChangedCallback(StatusChangedCallback callback);
-	void unsubStatusChangedCallback(uint64_t callbackId);
+	void write(SocketMsgId id, const std::string& msg);
+	void write(SocketMsgId id, const char* msg, size_t bytes);
+	CallbackToken subStatusChangedCallback(StatusChangedCallback callback);
+	void unsubStatusChangedCallback(CallbackToken token);
+	CallbackToken subMsgReceivedCallback(SocketMsgId id, MsgReceivedCallback callback);
+	void unsubMsgReceivedCallback(SocketMsgId id, CallbackToken token);
 
 private:
 	enum class ResultCode
@@ -56,7 +65,7 @@ private:
 	};
 
 	void notify(Status status);
-	void notify(char id, const std::string& msg) const;
+	void notify(SocketMsgId id, const std::string& msg) const;
 	void readLoop();
 	int writeBytes(const char* data, size_t bytes) const;
 	ReadResult readBytes(SOCKET socket, size_t bytes) const;
@@ -66,9 +75,10 @@ private:
 	std::thread _readThread;
 	std::mutex _writeMutex;
 	std::mutex _statusMutex;
-	std::atomic<uint64_t> _nextMsgReceivedCbId;
-	std::atomic<uint64_t> _nextStatusChangedCbId;
 	std::atomic_bool _isReading;
-	std::unordered_map<uint64_t, MsgReceivedCallback> _msgReceivedCallbacks;
-	std::unordered_map<uint64_t, StatusChangedCallback> _statusChangedCallbacks;
+	std::atomic<CallbackToken> _nextMsgReceivedCbToken;
+	std::atomic<CallbackToken> _nextStatusChangedCbToken;
+	std::unordered_map<SocketMsgId, std::vector<CallbackToken>> _msgReceivedCbTokens;
+	std::unordered_map<CallbackToken, MsgReceivedCallback> _msgReceivedCallbacks;
+	std::unordered_map<CallbackToken, StatusChangedCallback> _statusChangedCallbacks;
 };

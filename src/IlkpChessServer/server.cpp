@@ -1,10 +1,12 @@
 #include "server.h"
 #include "listen_socket.h"
 #include "chess.h"
+#include "player.h"
 
 Server::Server(const std::string& name, const std::string& port) : 
 	Logger(name),
 	_closeRequested(false),
+	_tickRate(1000/30),
 	_mainThread(std::thread(&Server::mainLoop, this, port))
 {
 }
@@ -29,23 +31,30 @@ void Server::waitForClose()
 void Server::mainLoop(const std::string& port)
 {
 	writeLog("starting");
+	GameState gameState = GameState::defaultStartingState();
 	ListenSocket listenSocket("ListenSocket", port);
-	std::vector<Socket> playerSockets;
-	while (playerSockets.size() < 1)
+	std::vector<Player> players;
+	while (players.size() < 2)
 	{
-		std::optional<Socket> socket = listenSocket.nextSocket();
-		if (socket.has_value())
-			playerSockets.push_back(std::move(socket.value()));
+		Socket socket = listenSocket.nextSocket();
+		if (socket.isValid())
+		{
+			const std::string ip = socket.getIp();
+			Player newPlayer{ .socket = std::move(socket), .ip = ip, .playingAs = (Side)players.size() };
+			newPlayer.socket.write(SocketMsgId::gameState, reinterpret_cast<const char*>(&gameState), sizeof(GameState));
+			newPlayer.socket.write(SocketMsgId::youPlayAs, reinterpret_cast<const char*>(&newPlayer.playingAs), sizeof(Side));
+			players.push_back(std::move(newPlayer));
+		}
 		else
-			std::this_thread::sleep_for(std::chrono::milliseconds(100));
+			std::this_thread::sleep_for(_tickRate);
 	}
 
-	GameState gameState = GameState::defaultStartingState();
-	playerSockets[0].write(SocketMsgId::gameState, reinterpret_cast<const char*>(&gameState), sizeof(GameState));
+	for (Player& player : players)
+		player.socket.write(SocketMsgId::startGame, "");
 
 	while (!_closeRequested)
 	{
-		playerSockets[0].write(SocketMsgId::ping, "");
+		players[0].socket.write(SocketMsgId::ping, "");
 		std::this_thread::sleep_for(std::chrono::milliseconds(100));
 	}
 
